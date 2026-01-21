@@ -1,8 +1,3 @@
-/*
-  Toon Boom Harmony - Import Animatic (Batch)
-  Qt Script (Harmony) is based on ECMAScript 3.0.
-*/
-
 function log(msg)
 {
     if (typeof System !== "undefined" && System.println) {
@@ -76,7 +71,7 @@ function parseJson(txt)
     return eval("(" + cleaned + ")");
 }
 
-function run()
+function main()
 {
     log("[import_animatic] START");
 
@@ -166,4 +161,4 @@ function run()
     log("[import_animatic] DONE");
 }
 
-run();
+main();
