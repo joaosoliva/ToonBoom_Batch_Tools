@@ -6,10 +6,14 @@
 
 function log(msg)
 {
-    if (System && System.println) {
-        System.println(msg);
-    } else if (MessageLog && MessageLog.trace) {
-        MessageLog.trace(msg);
+    var s = "";
+    try { s = String(msg); } catch (e) { s = "[unprintable]"; }
+
+    if (typeof System !== "undefined" && System.println) {
+        System.println(s);
+    }
+    if (typeof MessageLog !== "undefined" && MessageLog.trace) {
+        MessageLog.trace(s);
     }
 }
 
@@ -73,14 +77,16 @@ function run()
     log("[import_animatic] START");
 
     var tbJob = "";
-    if (System && System.getenv) {
+    if (typeof System !== "undefined" && System.getenv) {
         tbJob = System.getenv("TB_JOB");
     }
     if (tbJob) log("[import_animatic] TB_JOB env=" + tbJob);
 
     var scenePath = "";
     try {
-        scenePath = scene.currentProjectPath();
+        if (typeof scene !== "undefined" && scene.currentProjectPath) {
+            scenePath = scene.currentProjectPath();
+        }
     } catch (e) {
         scenePath = "";
     }
@@ -109,7 +115,12 @@ function run()
     log("[import_animatic] using jobPath=" + jobPath);
 
     var jobTxt = readTextFile(jobPath);
-    var job = JSON.parse(jobTxt);
+    var job = null;
+    if (typeof JSON !== "undefined" && JSON.parse) {
+        job = JSON.parse(jobTxt);
+    } else {
+        job = eval("(" + jobTxt + ")");
+    }
 
     if (!job.animatic_mp4) {
         throw "job.animatic_mp4 is empty";
@@ -156,4 +167,9 @@ function run()
     log("[import_animatic] DONE");
 }
 
-run();
+try {
+    run();
+} catch (err) {
+    log("[import_animatic] ERROR: " + err);
+    throw err;
+}
