@@ -13,7 +13,7 @@ from core.tool_base import ToolContext
 @dataclass
 class SceneSetupTool:
     ctx: ToolContext
-    name = "Scene Setup (Animatic)"
+    name = "Scene Setup (JSON)"
 
     # --------------------------------------------------
     # UI
@@ -22,34 +22,22 @@ class SceneSetupTool:
     def build_ui(self, parent: tk.Frame) -> None:
         self.parent = parent
 
-        self.scenes_root = tk.StringVar(value="")
-        self.anim_root = tk.StringVar(value="")
+        default_manifest = self.ctx.config.get("scenes_manifest", "")
+        self.manifest_path = tk.StringVar(value=default_manifest)
 
         self.scene_list = tk.Text(parent, height=10, width=25)
 
         row = 0
 
-        ttk.Label(parent, text="Scenes root:").grid(
+        ttk.Label(parent, text="JSON de cenas:").grid(
             row=row, column=0, sticky="w", padx=8, pady=4
         )
-        ttk.Entry(parent, textvariable=self.scenes_root, width=70).grid(
+        ttk.Entry(parent, textvariable=self.manifest_path, width=70).grid(
             row=row, column=1, sticky="we", padx=8
         )
         ttk.Button(
             parent, text="Browse",
-            command=lambda: self._pick_dir(self.scenes_root)
-        ).grid(row=row, column=2, padx=8)
-        row += 1
-
-        ttk.Label(parent, text="Animatics root:").grid(
-            row=row, column=0, sticky="w", padx=8, pady=4
-        )
-        ttk.Entry(parent, textvariable=self.anim_root, width=70).grid(
-            row=row, column=1, sticky="we", padx=8
-        )
-        ttk.Button(
-            parent, text="Browse",
-            command=lambda: self._pick_dir(self.anim_root)
+            command=self._pick_manifest
         ).grid(row=row, column=2, padx=8)
         row += 1
 
@@ -64,20 +52,60 @@ class SceneSetupTool:
 
         ttk.Button(
             parent,
-            text="Importar Animatic (Batch)",
+            text="Rodar Setup (Batch)",
             command=self.run
         ).grid(row=row, column=1, sticky="e", padx=8, pady=10)
 
         parent.grid_columnconfigure(1, weight=1)
 
-    def _pick_dir(self, var):
-        p = filedialog.askdirectory()
+    def _pick_manifest(self):
+        p = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json")]
+        )
         if p:
-            var.set(p)
+            self.manifest_path.set(p)
 
     # --------------------------------------------------
     # Run
     # --------------------------------------------------
+
+    def _resolve_path(self, raw: str, base: Path | None = None) -> Path:
+        candidate = Path(raw)
+        if candidate.is_absolute() or (len(raw) > 1 and raw[1] == ":"):
+            return candidate
+        if base is None:
+            return candidate
+        return base / candidate
+
+    def _load_manifest(self, path: Path) -> dict:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("JSON principal deve ser um objeto")
+        if "scenes" not in payload or not isinstance(payload["scenes"], list):
+            raise ValueError("JSON deve conter a lista 'scenes'")
+        return payload
+
+    def _scene_dir_from_manifest(self, manifest: dict, scene: dict) -> Path:
+        project = manifest.get("project", {})
+        project_paths = project.get("paths", {})
+
+        scenes_root_raw = project_paths.get("scenes")
+        scenes_root = None
+        if scenes_root_raw:
+            scenes_root = self._resolve_path(
+                scenes_root_raw,
+                Path(project.get("root_path", "") or ".")
+            )
+
+        scene_dir_raw = scene.get("scene_dir")
+        scene_id = scene.get("scene_id") or scene.get("scene_code")
+        if scene_dir_raw:
+            return self._resolve_path(scene_dir_raw, scenes_root)
+        if scenes_root and scene_id:
+            return scenes_root / scene_id
+        raise ValueError(
+            f"Cena {scene_id!r} sem scene_dir e sem project.paths.scenes."
+        )
 
     def run(self) -> None:
         try:
@@ -89,54 +117,51 @@ class SceneSetupTool:
             script_js = (
                 Path(__file__).parent.parent
                 / "harmony_scripts"
-                / "import_animatic.js"
+                / "run_scene_setup.js"
             ).resolve()
 
             if not script_js.exists():
                 raise FileNotFoundError(f"Script JS não encontrado:\n{script_js}")
 
-            scenes_root = Path(self.scenes_root.get()).resolve()
-            anim_root = Path(self.anim_root.get()).resolve()
-
-            if not scenes_root.exists():
-                raise FileNotFoundError(f"Scenes root inválido:\n{scenes_root}")
-
-            if not anim_root.exists():
-                raise FileNotFoundError(f"Animatics root inválido:\n{anim_root}")
+            manifest_path = Path(self.manifest_path.get()).resolve()
+            if not manifest_path.exists():
+                raise FileNotFoundError(f"JSON não encontrado:\n{manifest_path}")
+            self.ctx.config["scenes_manifest"] = str(manifest_path)
 
             # ---------- Scenes ----------
-            scenes = [
+            requested_scenes = [
                 ln.strip()
                 for ln in self.scene_list.get("1.0", "end").splitlines()
                 if ln.strip()
             ]
 
-            if not scenes:
-                raise ValueError("Nenhuma cena listada")
+            manifest = self._load_manifest(manifest_path)
+            manifest_scenes = manifest["scenes"]
 
             # ---------- Process ----------
-            for scene_code in scenes:
-                scene_dir = scenes_root / scene_code
+            matched = 0
+            for scene in manifest_scenes:
+                scene_id = scene.get("scene_id") or scene.get("scene_code")
+                if not scene_id:
+                    continue
+                if requested_scenes and scene_id not in requested_scenes:
+                    continue
+                matched += 1
+
+                scene_dir = self._scene_dir_from_manifest(manifest, scene)
                 scene_dir.mkdir(parents=True, exist_ok=True)
 
-                xstage = scene_dir / f"{scene_code}.xstage"
+                xstage = scene_dir / f"{scene_id}.xstage"
                 if not xstage.exists():
                     xstage.touch()
 
-                animatic = anim_root / f"{scene_code}.mp4"
-                if not animatic.exists():
-                    raise FileNotFoundError(
-                        f"Animatic não encontrado:\n{animatic}"
-                    )
-
                 # ---------- Job ----------
                 job = {
-                    "scene_code": scene_code,
-                    "scene_dir": str(scene_dir),
-                    "animatic_mp4": str(animatic)
+                    "scene_id": scene_id,
+                    "config_path": str(manifest_path)
                 }
 
-                job_path = scene_dir / "_job_animatic.json"
+                job_path = scene_dir / "_tb_jobs" / f"job_scene_setup_{scene_id}.json"
                 job_path.write_text(
                     json.dumps(job, indent=2, ensure_ascii=False),
                     encoding="utf-8"
@@ -158,9 +183,12 @@ class SceneSetupTool:
                     env=env
                 )
 
+            if requested_scenes and matched == 0:
+                raise ValueError("Nenhuma cena encontrada no JSON com os códigos informados.")
+
             messagebox.showinfo(
                 "Sucesso",
-                "Animatic importado com sucesso em todas as cenas."
+                "Setup executado com sucesso nas cenas selecionadas."
             )
 
         except subprocess.CalledProcessError as e:

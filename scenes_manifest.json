@@ -1,0 +1,63 @@
+{
+  "project": {
+    "name": "ProjetoExemplo",
+    "root_path": "P:/Projeto",
+    "fps": 24,
+    "resolution": {
+      "width": 1920,
+      "height": 1080
+    },
+    "paths": {
+      "scenes": "P:/Projeto/Scenes",
+      "bgs": "P:/Projeto/Assets/BG",
+      "rigs": "P:/Projeto/Assets/Rig",
+      "animatics": "P:/Projeto/Animatic"
+    }
+  },
+  "defaults": {
+    "bg": {
+      "node_name": "BG",
+      "start_frame": 1,
+      "convert_to_tvg": false,
+      "drawing_name": "1"
+    },
+    "rig": {
+      "offset": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    },
+    "animatic": {
+      "image_prefix": "ANIM_",
+      "start_frame": 1
+    }
+  },
+  "scenes": [
+    {
+      "scene_id": "C01",
+      "scene_dir": "C01",
+      "duration": 240,
+      "bg": {
+        "path": "SC_001/bg.png"
+      },
+      "rig": {
+        "path": "character.tpl"
+      },
+      "animatic": {
+        "path": "C01.mp4"
+      },
+      "nodes": [
+        {
+          "name": "COMP",
+          "type": "COMPOSITE",
+          "position": {
+            "x": 100,
+            "y": 200,
+            "z": 0
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -20,6 +20,7 @@ def load_config() -> dict:
         "ffmpeg_path": "ffmpeg",  # ou r"C:\ffmpeg\bin\ffmpeg.exe"
         "harmony_exe": r"C:\Program Files\Toon Boom Harmony 24\win64\bin\Harmony.exe",
         "harmony_script": str(Path("harmony_scripts/run_scene_setup.js").resolve()),
+        "scenes_manifest": str(Path("scenes_manifest.json").resolve()),
         "project_root": "",
         "scenes_root": "",
         "animatics_root": "",
