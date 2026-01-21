@@ -161,7 +161,9 @@ class SceneSetupTool:
                     "config_path": str(manifest_path)
                 }
 
-                job_path = scene_dir / "_tb_jobs" / f"job_scene_setup_{scene_id}.json"
+                job_dir = scene_dir / "_tb_jobs"
+                job_dir.mkdir(parents=True, exist_ok=True)
+                job_path = job_dir / f"job_scene_setup_{scene_id}.json"
                 job_path.write_text(
                     json.dumps(job, indent=2, ensure_ascii=False),
                     encoding="utf-8"
