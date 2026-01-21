@@ -4,114 +4,156 @@
   Evite: const/let, arrow (=>), template strings (`...`), etc.
 */
 
-function _println(msg) {
-  var s = "";
-  try { s = String(msg); } catch (e) { s = "[unprintable]"; }
-
-  // No batch, System.println vai pro console/terminal.
-  try { System.println(s); } catch (e1) {}
-  // Se abrir dentro do Harmony UI, também cai no MessageLog.
-  try { MessageLog.trace(s); } catch (e2) {}
+function log(msg)
+{
+    if (System && System.println) {
+        System.println(msg);
+    } else if (MessageLog && MessageLog.trace) {
+        MessageLog.trace(msg);
+    }
 }
 
-function _normalizePath(p) {
-  if (p === undefined || p === null) return "";
-  // Em Qt/Harmony no Windows, "/" costuma ser mais seguro.
-  return String(p).split("\\").join("/");
+function stripBOM(txt)
+{
+    if (txt && txt.length > 0 && txt.charCodeAt(0) === 0xFEFF) {
+        return txt.substring(1);
+    }
+    return txt;
 }
 
-function _stripBOM(text) {
-  if (!text || text.length < 1) return text;
-  // UTF-8 BOM pode aparecer como U+FEFF no começo do texto
-  if (text.charCodeAt(0) === 0xFEFF) return text.substring(1);
-  return text;
+function candidatesFromPath(p)
+{
+    var s = String(p);
+    var c = [];
+    c[c.length] = s;
+    c[c.length] = s.split("\\").join("/");
+    c[c.length] = s.split("/").join("\\");
+
+    if (s.length >= 2 && s.charAt(1) === ":") {
+        var fwd = s.split("\\").join("/");
+        c[c.length] = "file:///" + fwd;
+    }
+    return c;
 }
 
-function _loadJob(jobPath) {
-  var f = new File(jobPath);
-  if (!f.exists) {
-    throw "TB_JOB não encontrado: " + jobPath;
-  }
-
-  f.open(FileAccess.ReadOnly);
-  var txt = f.read();
-  f.close();
-
-  txt = _stripBOM(txt);
-
-  var job = null;
-  // JSON pode existir, mas por segurança deixo fallback.
-  if (typeof JSON !== "undefined" && JSON.parse) {
-    job = JSON.parse(txt);
-  } else {
-    job = eval("(" + txt + ")");
-  }
-
-  return job;
+function pickExisting(label, list)
+{
+    var i;
+    for (i = 0; i < list.length; i++) {
+        var p = list[i];
+        var f = new File(p);
+        var ex = f.exists ? "true" : "false";
+        log(label + " try: " + p + " exists=" + ex);
+        if (f.exists) {
+            return p;
+        }
+    }
+    return "";
 }
 
-function _ensureDir(path) {
-  var p = _normalizePath(path);
-  var d = new Dir(p);
-  if (!d.exists) {
-    d.mkdirs();
-  }
+function readTextFile(path)
+{
+    var f = new File(path);
+    f.open(FileAccess.ReadOnly);
+    var txt = f.read();
+    f.close();
+    return stripBOM(txt);
 }
 
-function importAnimatic() {
-  _println("[import_animatic] START");
-
-  var jobPath = System.getenv("TB_JOB");
-  if (!jobPath) {
-    throw "Variável de ambiente TB_JOB vazia. O Python precisa setar TB_JOB antes de chamar o Harmony.";
-  }
-
-  jobPath = _normalizePath(jobPath);
-  _println("[import_animatic] TB_JOB=" + jobPath);
-
-  var job = _loadJob(jobPath);
-
-  var mp4 = _normalizePath(job.animatic_mp4);
-  var imageFolder = _normalizePath(job.image_folder);
-  var imagePrefix = job.image_prefix ? String(job.image_prefix) : "ANIM_";
-  var startFrame = job.start_frame ? parseInt(job.start_frame, 10) : 1;
-  var audioFile = job.audio_file ? _normalizePath(job.audio_file) : "";
-
-  if (!mp4) throw "job.animatic_mp4 está vazio";
-  if (!imageFolder) throw "job.image_folder está vazio";
-
-  _println("[import_animatic] mp4=" + mp4);
-  _println("[import_animatic] imageFolder=" + imageFolder);
-  _println("[import_animatic] imagePrefix=" + imagePrefix);
-  _println("[import_animatic] startFrame=" + startFrame);
-  if (audioFile) _println("[import_animatic] audioFile=" + audioFile);
-
-  _ensureDir(imageFolder);
-
-  // MovieImport é um GLOBAL OBJECT do Harmony.
-  MovieImport.setMovieFilename(mp4);
-  MovieImport.setImageFolder(imageFolder);
-  MovieImport.setImagePrefix(imagePrefix);
-
-  // Alinha no começo: frame 1 (equivalente ao "0" visual do usuário na timeline).
-  MovieImport.setStartFrame(startFrame);
-
-  if (audioFile) {
-    MovieImport.setAudioFile(audioFile);
-  }
-
-  var ok = MovieImport.doImport();
-  if (!ok) {
-    throw "MovieImport.doImport() retornou false";
-  }
-
-  _println("[import_animatic] DONE");
+function ensureDir(path)
+{
+    var d = new Dir(path);
+    if (!d.exists) {
+        d.mkdirs();
+    }
 }
 
-// Executa imediatamente (ideal pra -batch -compile)
-try {
-  importAnimatic();
-} catch (err) {
-  _println("[import_animatic] ERROR: " + err);
-  throw err;
+function run()
+{
+    log("[import_animatic] START");
+
+    var tbJob = "";
+    if (System && System.getenv) {
+        tbJob = System.getenv("TB_JOB");
+    }
+    if (tbJob) log("[import_animatic] TB_JOB env=" + tbJob);
+
+    var scenePath = "";
+    try {
+        scenePath = scene.currentProjectPath();
+    } catch (e) {
+        scenePath = "";
+    }
+    if (scenePath) log("[import_animatic] scene path=" + scenePath);
+
+    var jobCandidates = [];
+    if (tbJob) {
+        var envCands = candidatesFromPath(tbJob);
+        var i;
+        for (i = 0; i < envCands.length; i++) jobCandidates[jobCandidates.length] = envCands[i];
+    }
+
+    if (scenePath) {
+        var spF = String(scenePath).split("\\").join("/");
+        var spB = String(scenePath).split("/").join("\\");
+        jobCandidates[jobCandidates.length] = spF + "/_job_animatic.json";
+        jobCandidates[jobCandidates.length] = spB + "\\_job_animatic.json";
+        jobCandidates[jobCandidates.length] = spF + "/_tb_job_import_animatic.json";
+        jobCandidates[jobCandidates.length] = spB + "\\_tb_job_import_animatic.json";
+    }
+
+    var jobPath = pickExisting("[import_animatic] job", jobCandidates);
+    if (jobPath === "") {
+        throw "Job JSON not found. TB_JOB=" + tbJob;
+    }
+    log("[import_animatic] using jobPath=" + jobPath);
+
+    var jobTxt = readTextFile(jobPath);
+    var job = JSON.parse(jobTxt);
+
+    if (!job.animatic_mp4) {
+        throw "job.animatic_mp4 is empty";
+    }
+
+    var mp4Path = pickExisting("[import_animatic] mp4", candidatesFromPath(job.animatic_mp4));
+    if (mp4Path === "") {
+        throw "MP4 not found: " + job.animatic_mp4;
+    }
+    log("[import_animatic] using mp4Path=" + mp4Path);
+
+    var outFolder = "";
+    if (job.image_folder) {
+        outFolder = String(job.image_folder);
+    } else if (scenePath) {
+        var sp = String(scenePath).split("\\").join("/");
+        outFolder = sp + "/elements/animatic";
+    } else {
+        outFolder = "elements/animatic";
+    }
+
+    ensureDir(outFolder);
+
+    var prefix = job.image_prefix ? String(job.image_prefix) : "ANIMATIC_";
+    var startFrame = job.start_frame ? parseInt(job.start_frame, 10) : 1;
+
+    MovieImport.setMovieFilename(mp4Path);
+    MovieImport.setImageFolder(outFolder);
+    MovieImport.setImagePrefix(prefix);
+    MovieImport.setStartFrame(startFrame);
+
+    if (job.audio_file) {
+        var audioPath = pickExisting("[import_animatic] audio", candidatesFromPath(job.audio_file));
+        if (audioPath !== "") {
+            MovieImport.setAudioFile(audioPath);
+        }
+    }
+
+    var ok = MovieImport.doImport();
+    if (!ok) {
+        throw "MovieImport.doImport() returned false";
+    }
+
+    log("[import_animatic] DONE");
 }
+
+run();
