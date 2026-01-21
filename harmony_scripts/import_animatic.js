@@ -1,6 +1,3 @@
-// Toon Boom Harmony - Import Animatic (Batch)
-// Qt Script (Harmony) is based on ECMAScript 3.0.
-
 function log(msg)
 {
     if (typeof System !== "undefined" && System.println) {
