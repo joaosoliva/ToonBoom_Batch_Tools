@@ -1,0 +1,11 @@
+{
+  "ffmpeg_path": "ffmpeg",
+  "harmony_exe": "C:/Program Files (x86)/Toon Boom Animation/Toon Boom Harmony 24 Premium/win64/bin/HarmonyPremium.exe",
+  "harmony_script": "harmony_scripts/scene_setup.js",
+  "project_root": "",
+  "scenes_root": "",
+  "animatics_root": "",
+  "bgs_root": "",
+  "rigs_root": "",
+  "fps": 24
+}
