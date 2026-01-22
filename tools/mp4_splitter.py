@@ -65,7 +65,7 @@ class MP4SplitterTool:
         )
         row += 1
 
-        ttk.Label(parent, text="Cena inicial (C01 = 1):").grid(
+        ttk.Label(parent, text="Cena inicial (C001 = 1):").grid(
             row=row, column=0, sticky="w", padx=8, pady=6
         )
         ttk.Entry(parent, textvariable=self.start_idx_var, width=10).grid(
@@ -141,7 +141,7 @@ class MP4SplitterTool:
             self.log("=== MP4 SPLITTER ===")
             self.log(f"Master: {master}")
             self.log(f"Output: {outdir}")
-            self.log(f"Cena inicial: C{start_idx:02d}")
+            self.log(f"Cena inicial: C{start_idx:03d}")
 
             lines = [
                 ln.strip()
@@ -166,7 +166,7 @@ class MP4SplitterTool:
                 a = secs[i]
                 b = secs[i + 1]
                 idx = start_idx + i
-                name = f"C{idx:02d}.mp4"
+                name = f"C{idx:03d}.mp4"
                 out = outdir / name
 
                 duration = b - a
