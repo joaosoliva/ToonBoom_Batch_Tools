@@ -12,15 +12,47 @@ from core.tool_base import ToolContext
 # Utils
 # ------------------------------------------------------------
 
-TS_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*$")
+FRAME_RE = re.compile(r"^\s*\d+\s*$")
 
-def ts_to_seconds(ts: str) -> int:
-    m = TS_RE.match(ts)
-    if not m:
-        raise ValueError(f"Timestamp inválido: {ts!r} (use MM:SS)")
-    mm = int(m.group(1))
-    ss = int(m.group(2))
-    return mm * 60 + ss
+def parse_frame_count(value: str) -> int:
+    if not FRAME_RE.match(value):
+        raise ValueError(f"Número de frames inválido: {value!r}")
+    frames = int(value)
+    if frames <= 0:
+        raise ValueError("Número de frames precisa ser maior que zero.")
+    return frames
+
+def parse_frame_rate(value: str) -> float:
+    if "/" in value:
+        num, den = value.split("/", 1)
+        return float(num) / float(den)
+    return float(value)
+
+def get_video_fps(ffprobe: str, master: Path) -> float:
+    cmd = [
+        ffprobe,
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(master)
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0 or not result.stdout.strip():
+        raise RuntimeError("Não foi possível detectar FPS do vídeo.")
+    return parse_frame_rate(result.stdout.strip())
+
+def has_audio_stream(ffprobe: str, master: Path) -> bool:
+    cmd = [
+        ffprobe,
+        "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=index",
+        "-of", "csv=p=0",
+        str(master)
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return bool(result.stdout.strip())
 
 
 # ------------------------------------------------------------
@@ -73,7 +105,7 @@ class MP4SplitterTool:
         )
         row += 1
 
-        ttk.Label(parent, text="Timestamps (MM:SS – um por linha):").grid(
+        ttk.Label(parent, text="Frames por cena (um por linha):").grid(
             row=row, column=0, sticky="nw", padx=8, pady=6
         )
         self.ts_text = tk.Text(parent, height=8, width=40)
@@ -149,42 +181,78 @@ class MP4SplitterTool:
                 if ln.strip()
             ]
 
-            self.log(f"Timestamps: {lines}")
+            self.log(f"Frames por cena: {lines}")
 
-            if len(lines) < 2:
-                raise ValueError("Cole pelo menos 2 timestamps.")
+            if len(lines) < 1:
+                raise ValueError("Cole pelo menos 1 valor de frame.")
 
-            secs = [ts_to_seconds(x) for x in lines]
-
-            if secs != sorted(secs):
-                raise ValueError("Timestamps precisam estar em ordem crescente.")
+            frame_counts = [parse_frame_count(x) for x in lines]
 
             ffmpeg = self.ctx.config.get("ffmpeg_path", "ffmpeg")
+            ffprobe = self.ctx.config.get("ffprobe_path", "ffprobe")
             self.log(f"FFmpeg: {ffmpeg}")
+            self.log(f"FFprobe: {ffprobe}")
 
-            for i in range(len(secs) - 1):
-                a = secs[i]
-                b = secs[i + 1]
+            fps = get_video_fps(ffprobe, master)
+            audio_enabled = has_audio_stream(ffprobe, master)
+            self.log(f"FPS detectado: {fps:.6f}")
+            self.log(f"Áudio detectado: {'sim' if audio_enabled else 'não'}")
+
+            start_frame = 0
+
+            for i, frames in enumerate(frame_counts):
                 idx = start_idx + i
                 name = f"C{idx:03d}.mp4"
                 out = outdir / name
 
-                duration = b - a
+                end_frame = start_frame + frames
+                start_time = start_frame / fps
+                end_time = end_frame / fps
 
-                cmd = [
-                    ffmpeg,
-                    "-hide_banner",
-                    "-y",
-                    "-ss", str(a),
-                    "-t", str(duration),
-                    "-i", str(master),
-                    "-c", "copy",
-                    str(out)
-                ]
+                if audio_enabled:
+                    filter_complex = (
+                        f"[0:v]trim=start_frame={start_frame}:end_frame={end_frame},"
+                        f"setpts=PTS-STARTPTS[v];"
+                        f"[0:a]atrim=start={start_time:.6f}:end={end_time:.6f},"
+                        f"asetpts=PTS-STARTPTS[a]"
+                    )
+                    cmd = [
+                        ffmpeg,
+                        "-hide_banner",
+                        "-y",
+                        "-i", str(master),
+                        "-filter_complex", filter_complex,
+                        "-map", "[v]",
+                        "-map", "[a]",
+                        "-c:v", "libx264",
+                        "-crf", "18",
+                        "-preset", "veryfast",
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        str(out)
+                    ]
+                else:
+                    vf = (
+                        f"trim=start_frame={start_frame}:end_frame={end_frame},"
+                        f"setpts=PTS-STARTPTS"
+                    )
+                    cmd = [
+                        ffmpeg,
+                        "-hide_banner",
+                        "-y",
+                        "-i", str(master),
+                        "-vf", vf,
+                        "-an",
+                        "-c:v", "libx264",
+                        "-crf", "18",
+                        "-preset", "veryfast",
+                        str(out)
+                    ]
 
 
                 self.log("\n------------------------------")
                 self.log(f"Gerando {name}")
+                self.log(f"Frames: {start_frame} -> {end_frame - 1} ({frames})")
                 self.log("CMD:")
                 self.log(" ".join(cmd))
 
@@ -205,9 +273,11 @@ class MP4SplitterTool:
                 if proc.returncode != 0:
                     raise RuntimeError(f"FFmpeg falhou ao gerar {name}")
 
+                start_frame = end_frame
+
             messagebox.showinfo(
                 "Sucesso",
-                f"{len(secs) - 1} MP4s gerados com sucesso."
+                f"{len(frame_counts)} MP4s gerados com sucesso."
             )
 
         except Exception as e:
